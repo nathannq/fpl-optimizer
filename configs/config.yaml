@@ -1,0 +1,53 @@
+# Single source of configuration. Relative paths are resolved from the repo root.
+
+paths:
+  raw_history: data/raw/vaastav        # downloaded historical seasons (gitignored)
+  api_cache: data/cache/api            # timestamped FPL API responses
+  snapshots: data/snapshots            # archived bootstrap-static (for future ep_next backtests)
+  processed: data/processed            # feature table (parquet)
+  reports: reports                     # generated, committed results
+
+history:
+  repo: vaastav/Fantasy-Premier-League
+  # Pinned commit so the training data is reproducible. Use "master" to take the latest.
+  ref: d7b05b51d137bfefef4b692386d18c610975b9b9
+  seasons: ["2022-23", "2023-24", "2024-25", "2025-26"]   # first seasons with xG/xA
+  files: ["gws/merged_gw.csv", "players_raw.csv", "teams.csv", "fixtures.csv"]
+  # vaastav's xP column is all zeros in gameweeks where the scrape failed;
+  # a gameweek's xP is kept only if at least this share of rows is non-zero.
+  xp_valid_min_nonzero_share: 0.2
+
+live:
+  season: "2026-27"                    # the current season comes from the official API
+  base_url: https://fantasy.premierleague.com/api
+  request_workers: 4
+  ttl_seconds:                         # how long a cached response counts as fresh
+    bootstrap: 3600
+    fixtures: 3600
+    element_summary: 43200
+    entry: 300
+    league: 300
+
+features:
+  rolling_windows: [3, 5]              # player form windows, in team fixtures
+  team_window: 6                       # team strength window, in matches
+  per90_min_minutes: 90                # per-90 rates need at least this many minutes in the window
+  fixture_horizon: 3                   # "next N gameweeks" fixture difficulty
+  # Teams with no prior matches in the data (promoted sides) start from these per-match values.
+  promoted_prior:
+    xg_for: 1.05
+    xg_against: 1.75
+    goals_for: 1.0
+    goals_against: 1.8
+    points: 0.9
+    clean_sheet: 0.15
+
+targets:
+  haul_points: 8                       # "haul" classifier target: points >= this
+  return_points: 5                     # a "return" in the differential evaluation
+  multi_gw_horizon: 3                  # optional target: points over the next N gameweeks
+
+evaluation:
+  seasons: ["2023-24", "2024-25", "2025-26", "2026-27"]
+  ownership_max_pct: 10.0              # a differential is owned by fewer than this % of managers
+  top_k: 10

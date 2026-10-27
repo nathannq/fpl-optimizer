@@ -1,0 +1,26 @@
+# Common tasks. Run `make setup` once, then `make refresh` each week.
+PY ?= .venv/bin/python
+
+.PHONY: setup data live features baselines refresh test
+
+setup:            ## create the virtualenv and install everything
+	uv venv --python 3.12 .venv || python3 -m venv .venv
+	$(PY) -m pip install -r requirements.txt -e . || uv pip install --python $(PY) -r requirements.txt -e .
+
+data:             ## download historical seasons (vaastav) into data/raw
+	$(PY) -m fplopt download-history
+
+live:             ## fetch and cache the current season from the FPL API
+	$(PY) -m fplopt fetch-live
+
+features:         ## build data/processed/features.parquet (history + live season)
+	$(PY) -m fplopt build-features
+
+baselines:        ## evaluate baselines -> reports/phase1_baselines.md
+	$(PY) -m fplopt baselines
+
+refresh:          ## everything above, in order
+	$(PY) -m fplopt refresh
+
+test:
+	$(PY) -m pytest
