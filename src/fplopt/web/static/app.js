@@ -16,6 +16,22 @@ const pct = (n, d = 1) => (n == null ? "–" : `${Number(n).toFixed(d)}%`);
 const signed = (n, d = 1) => (n > 0 ? "+" : n < 0 ? "−" : "±") + Math.abs(n).toFixed(d);
 const isDiff = (p) => STATUS && p.ownership != null && p.ownership < STATUS.ownership_max_pct;
 
+/* Deep links: #/team?id=123, #/league?id=456&team=123. demo=1 hides real team and manager names
+   (used for screenshots) and does not remember the ids. */
+const hashParams = () => new URLSearchParams(location.hash.split("?")[1] || "");
+const isDemo = () => hashParams().get("demo") === "1";
+const remember = (key, value) => { if (!isDemo()) store.set(key, value); };
+function anonymiseTeam(r) {
+  if (r.team) Object.assign(r.team, { name: "Demo XI", manager: "demo manager" });
+  return r;
+}
+function anonymiseLeague(d) {
+  d.league.name = "Demo league";
+  d.standings.forEach((s, i) => Object.assign(s, { entry_name: s.is_you ? "Demo XI" : `Rival ${String.fromCharCode(65 + (i % 26))}${i >= 26 ? i : ""}`,
+    manager: s.is_you ? "you" : "manager" }));
+  return d;
+}
+
 async function api(path) {
   const res = await fetch(path);
   const body = await res.json().catch(() => ({}));
@@ -106,7 +122,8 @@ const stat = (label, value, sub = "") =>
 const teamState = { result: null, selected: 0 };
 
 function renderTeamPage() {
-  const saved = store.get("teamId") || "";
+  const linked = hashParams().get("id");
+  const saved = linked || store.get("teamId") || "";
   $app.innerHTML = `
     <div class="page-head">
       <div><h1>Your next move</h1>
@@ -116,7 +133,7 @@ function renderTeamPage() {
     <div class="card card-pad">
       <form class="search" id="team-form">
         <label class="sr-only" for="team-id">Team ID</label>
-        <input id="team-id" inputmode="numeric" pattern="[0-9]*" placeholder="Team ID, e.g. 1234567" value="${esc(saved)}" style="flex:1;min-width:180px">
+        <input id="team-id" inputmode="numeric" pattern="[0-9]*" placeholder="Team ID, e.g. 1234567" value="${isDemo() ? "" : esc(saved)}" style="flex:1;min-width:180px">
         <button type="submit" id="team-go">Analyse team</button>
         <button type="button" class="ghost" id="squad-go">Best new squad</button>
       </form>
@@ -140,11 +157,11 @@ function renderTeamPage() {
     e.preventDefault();
     const id = document.getElementById("team-id").value.trim();
     if (!/^\d+$/.test(id)) { document.getElementById("team-result").innerHTML = errorBox("Team IDs are numbers."); return; }
-    store.set("teamId", id);
+    remember("teamId", id);
     runTeam(id);
   });
   document.getElementById("squad-go").addEventListener("click", () => runTeam(null));
-  if (teamState.result) drawTeamResult();
+  if (teamState.result && !linked) drawTeamResult();
   else if (saved) runTeam(saved);
   else document.getElementById("team-result").innerHTML =
     '<div class="card empty"><h2>No team loaded</h2><p>Enter your team ID, or build the best £100m squad from scratch.</p></div>';
@@ -162,6 +179,7 @@ async function runTeam(teamId) {
   document.querySelectorAll("#team-form button").forEach((b) => { b.disabled = true; });
   try {
     if (teamId) teamState.result = await api(`/api/team/${teamId}${query(params)}`);
+    if (isDemo()) anonymiseTeam(teamState.result);
     else teamState.result = await api(`/api/squad${query({ projection: params.projection, differential_bonus: params.differential_bonus })}`);
     teamState.selected = teamState.result.recommended;
     drawTeamResult();
@@ -291,8 +309,8 @@ async function loadDifferentials() {
 
 /* ---------- Mini-league ---------- */
 function renderLeaguePage() {
-  const league = store.get("leagueId") || "";
-  const team = store.get("teamId") || "";
+  const league = hashParams().get("id") || store.get("leagueId") || "";
+  const team = hashParams().get("team") || store.get("teamId") || "";
   $app.innerHTML = `
     <div class="page-head">
       <div><h1>Mini-league</h1>
@@ -302,9 +320,9 @@ function renderLeaguePage() {
     <div class="card card-pad">
       <form class="search" id="league-form">
         <div class="field" style="flex:1;min-width:160px"><label for="league-id">League ID</label>
-          <input id="league-id" inputmode="numeric" placeholder="e.g. 123456" value="${esc(league)}"></div>
+          <input id="league-id" inputmode="numeric" placeholder="e.g. 123456" value="${isDemo() ? "" : esc(league)}"></div>
         <div class="field" style="flex:1;min-width:160px"><label for="league-team">Your team ID (optional)</label>
-          <input id="league-team" inputmode="numeric" placeholder="highlights you" value="${esc(team)}"></div>
+          <input id="league-team" inputmode="numeric" placeholder="highlights you" value="${isDemo() ? "" : esc(team)}"></div>
         <div class="field"><label for="league-sample">Rivals to scan</label>
           <select id="league-sample">${[10, 20, 30, 50].map((n) => `<option ${n === 20 ? "selected" : ""}>${n}</option>`).join("")}</select></div>
         <button type="submit" style="align-self:flex-end">Load league</button>
@@ -316,8 +334,8 @@ function renderLeaguePage() {
     const id = document.getElementById("league-id").value.trim();
     const me = document.getElementById("league-team").value.trim();
     if (!/^\d+$/.test(id) || (me && !/^\d+$/.test(me))) { document.getElementById("league-result").innerHTML = errorBox("IDs are numbers."); return; }
-    store.set("leagueId", id);
-    if (me) store.set("teamId", me);
+    remember("leagueId", id);
+    if (me) remember("teamId", me);
     runLeague(id, me);
   });
   if (league) runLeague(league, team);
@@ -339,6 +357,7 @@ async function runLeague(id, teamId) {
   try {
     const sample = document.getElementById("league-sample").value;
     const d = await api(`/api/league/${id}${query({ team_id: teamId, sample })}`);
+    if (isDemo()) anonymiseLeague(d);
     const move = (s) => (s.last_rank && s.last_rank !== s.rank
       ? (s.rank < s.last_rank ? `<span class="gain" title="Up from ${s.last_rank}">▲</span>` : `<span class="loss" title="Down from ${s.last_rank}">▼</span>`)
       : '<span class="muted">–</span>');
@@ -366,7 +385,7 @@ async function runLeague(id, teamId) {
 const ROUTES = { team: renderTeamPage, differentials: renderDifferentialsPage, league: renderLeaguePage };
 
 function route() {
-  const name = (location.hash.replace(/^#\/?/, "") || "team").split("?")[0];
+  const name = location.hash.replace(/^#\/?/, "").split("?")[0] || "team";
   const page = ROUTES[name] ? name : "team";
   document.querySelectorAll(".tabs a").forEach((a) => a.classList.toggle("active", a.dataset.route === page));
   ROUTES[page]();

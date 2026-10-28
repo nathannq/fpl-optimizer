@@ -94,10 +94,19 @@ def cmd_serve(cfg: Config, args: argparse.Namespace) -> None:
     uvicorn.run(create_app(cfg), host=args.host, port=args.port, log_level="warning")
 
 
-def cmd_refresh(cfg: Config, args: argparse.Namespace) -> None:
-    args.force, args.no_live, args.top = False, False, cfg.evaluation.top_k
-    for step in (cmd_download_history, cmd_build_features, cmd_baselines, cmd_train, cmd_predict):
-        step(cfg, args)
+def cmd_weekly(cfg: Config, args: argparse.Namespace) -> None:
+    from fplopt.pipeline import run_weekly
+
+    summary, path = run_weekly(cfg, team_id=args.team_id, fresh=not args.cached, retrain=not args.no_retrain)
+    print(summary)
+    print(f"Saved {path}")
+
+
+def cmd_charts(cfg: Config, args: argparse.Namespace) -> None:
+    from fplopt.charts import make_charts
+
+    for path in make_charts(cfg):
+        print(f"Saved {path}")
 
 
 COMMANDS = {
@@ -110,7 +119,8 @@ COMMANDS = {
     "optimize": (cmd_optimize, "recommend transfers, XI and captain (or a new squad without --team-id)"),
     "backtest": (cmd_backtest, "replay seasons with each projection source -> reports/phase3_backtest.md"),
     "serve": (cmd_serve, "run the web UI (FastAPI) on http://127.0.0.1:8000"),
-    "refresh": (cmd_refresh, "download-history + build-features + baselines + train + predict"),
+    "charts": (cmd_charts, "draw the README result charts into docs/images/"),
+    "weekly": (cmd_weekly, "the weekly run: fresh data, features, retrain, predict, your team's plan"),
 }
 
 
@@ -130,6 +140,10 @@ def main(argv: list[str] | None = None) -> None:
         if name == "serve":
             p.add_argument("--host", default="127.0.0.1")
             p.add_argument("--port", type=int, default=8000)
+        if name == "weekly":
+            p.add_argument("--team-id", type=int, help="also plan transfers for this FPL team")
+            p.add_argument("--no-retrain", action="store_true", help="reuse the saved model (faster)")
+            p.add_argument("--cached", action="store_true", help="allow cached API data instead of refetching")
         if name == "optimize":
             p.add_argument("--team-id", type=int, help="your FPL team id (omit to build a new squad)")
             p.add_argument("--projection", choices=["model", "ep_next"], help="projection source (default: config)")

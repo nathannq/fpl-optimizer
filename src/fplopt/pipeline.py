@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import pandas as pd
 
@@ -19,12 +20,16 @@ FINAL_MODEL = "final"
 REGULAR_STARTER_MINUTES = 60
 
 
-def make_client(cfg: Config) -> FPLClient:
+def make_client(cfg: Config, fresh: bool = False) -> FPLClient:
+    """FPL API client. ``fresh`` ignores cached season data (it is still used if the API fails)."""
+    ttl = dict(cfg.live.ttl_seconds)
+    if fresh:
+        ttl.update(bootstrap=0, fixtures=0, element_summary=0)
     return FPLClient(
         cache_dir=cfg.paths.api_cache,
         snapshot_dir=cfg.paths.snapshots,
         base_url=cfg.live.base_url,
-        ttl=cfg.live.ttl_seconds,
+        ttl=ttl,
         workers=cfg.live.request_workers,
     )
 
@@ -110,7 +115,7 @@ def predict_upcoming(cfg: Config) -> pd.DataFrame:
     table = pd.read_parquet(cfg.paths.features)
     future = table[table["is_future"]].reset_index(drop=True)
     if future.empty:
-        raise RuntimeError("No upcoming gameweek rows - run `fplopt build-features` (live) first")
+        raise RuntimeError("No upcoming gameweek rows - run `python -m fplopt weekly` first")
     bundle = ModelBundle.load(cfg.paths.models / FINAL_MODEL)
     h = cfg.targets.multi_gw_horizon
 
@@ -187,3 +192,50 @@ def run_backtest_report(cfg: Config) -> str:
 def top_differentials(predictions: pd.DataFrame, k: int) -> pd.DataFrame:
     flagged = predictions.dropna(subset=["differential_score"])
     return flagged.sort_values("differential_score", ascending=False).head(k).reset_index(drop=True)
+
+
+def weekly_summary(predictions: pd.DataFrame, cfg: Config, team_text: str | None = None) -> str:
+    """Markdown summary of a weekly run: top differentials and (optionally) the team plan."""
+    from fplopt.reporting import markdown_table
+
+    gw = int(predictions["gw"].iloc[0])
+    top = top_differentials(predictions, cfg.evaluation.top_k)
+    table = pd.DataFrame({
+        "player": top["web_name"], "team": top["team_short"], "pos": top["position"],
+        "price": (top["now_cost"] / 10).map("£{:.1f}m".format), "owned": top["ownership_now"].map("{:.1f}%".format),
+        "xPts": top["pred_points"].map("{:.2f}".format), "P(haul)": top["p_haul"].map("{:.0%}".format), "why": top["reasons"],
+    })
+    parts = [f"# GW{gw} weekly run", "",
+             f"## Top {len(top)} differentials (owned by < {cfg.differential.ownership_max_pct:g}%)", "",
+             markdown_table(table), ""]
+    if team_text:
+        parts += ["## Your team", "", "```", team_text, "```", ""]
+    return "\n".join(parts)
+
+
+def run_weekly(cfg: Config, team_id: int | None = None, fresh: bool = True, retrain: bool = True,
+               client: FPLClient | None = None) -> tuple[str, Path]:
+    """The one weekly command: fresh data -> features -> (re)train -> predict -> your team.
+
+    Run it before each deadline: besides your recommendations it archives FPL's
+    pre-deadline ep_next, which is what makes an honest ep_next backtest possible.
+    Returns the summary text and the file it was saved to (``data/weekly/``, kept out of git).
+    """
+    from fplopt.baselines import baseline_report
+    from fplopt.data.vaastav import download_history
+    from fplopt.optimize.render import render
+    from fplopt.optimize.service import optimize_team
+
+    client = client or make_client(cfg, fresh=fresh)
+    download_history(cfg.history, cfg.paths.raw_history)                     # skips files already present
+    table = build_features(cfg, live=True, client=client)
+    (cfg.paths.reports / "phase1_baselines.md").write_text(baseline_report(table, cfg))
+    if retrain or not (cfg.paths.models / FINAL_MODEL / "models.joblib").exists():
+        run_training(cfg)
+    predictions = predict_upcoming(cfg)
+    team_text = render(optimize_team(cfg, client, team_id=team_id)) if team_id else None
+    summary = weekly_summary(predictions, cfg, team_text)
+    out = cfg.paths.processed.parent / "weekly" / f"gw{int(predictions['gw'].iloc[0])}.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(summary)
+    return summary, out

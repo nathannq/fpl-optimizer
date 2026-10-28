@@ -87,7 +87,7 @@ def create_app(cfg: Config | None = None, client: FPLClient | None = None) -> Fa
     @app.exception_handler(FileNotFoundError)
     async def missing_data(request: Request, exc: FileNotFoundError):
         return JSONResponse(status_code=503, content={
-            "detail": f"Data not ready ({Path(str(exc)).name}). Run `python -m fplopt refresh` first."})
+            "detail": f"Data not ready ({Path(str(exc)).name}). Run `python -m fplopt weekly` first."})
 
     @app.exception_handler(requests.HTTPError)
     async def fpl_error(request: Request, exc: requests.HTTPError):
@@ -139,7 +139,7 @@ def create_app(cfg: Config | None = None, client: FPLClient | None = None) -> Fa
                           position: Literal["GK", "DEF", "MID", "FWD"] | None = None,
                           max_price: float | None = Query(None, gt=0)):
         if not cfg.paths.predictions.exists():
-            raise HTTPException(503, "No predictions yet. Run `python -m fplopt refresh` first.")
+            raise HTTPException(503, "No predictions yet. Run `python -m fplopt weekly` first.")
         live = players()
         own = max_ownership or cfg.differential.ownership_max_pct
         return {"gameweek": int(live["next_gw"].iloc[0]), "max_ownership": own,

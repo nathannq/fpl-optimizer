@@ -1,7 +1,7 @@
-# Common tasks. Run `make setup` once, then `make refresh` each week.
+# Common tasks. Run `make setup` once, then `make weekly TEAM=<your team id>` before each deadline.
 PY ?= .venv/bin/python
 
-.PHONY: setup data live features baselines train predict optimize backtest serve refresh test
+.PHONY: setup data live features baselines train predict optimize backtest serve charts weekly refresh test
 
 setup:            ## create the virtualenv and install everything
 	uv venv --python 3.12 .venv || python3 -m venv .venv
@@ -34,8 +34,13 @@ backtest:         ## replay past seasons per projection source -> reports/phase3
 serve:            ## web UI on http://127.0.0.1:8000
 	$(PY) -m fplopt serve
 
-refresh:          ## data -> features -> baselines -> train -> predict
-	$(PY) -m fplopt refresh
+charts:           ## README result charts -> docs/images/
+	$(PY) -m fplopt charts
+
+weekly:           ## THE weekly command: make weekly TEAM=<team id>
+	$(PY) -m fplopt weekly $(if $(TEAM),--team-id $(TEAM))
+
+refresh: weekly
 
 test:
 	$(PY) -m pytest

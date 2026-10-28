@@ -178,4 +178,4 @@ def test_errors_are_clean_json(client, cfg, tmp_path):
     assert client.get("/api/league/404").json()["detail"].startswith("FPL has no team or league")
     empty = TestClient(create_app(replace(cfg, paths=replace(cfg.paths, processed=tmp_path)), client=None))
     r = empty.get("/api/differentials")
-    assert r.status_code == 503 and "refresh" in r.json()["detail"]
+    assert r.status_code == 503 and "fplopt weekly" in r.json()["detail"]
