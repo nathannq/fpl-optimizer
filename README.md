@@ -86,7 +86,7 @@ model's projections for its own team were honest: 54 projected, 55-58 delivered.
 Requires Python 3.11+. On macOS, LightGBM also needs OpenMP (`brew install libomp`).
 
 ```bash
-git clone <this repo> && cd fpl-optimizer
+git clone https://github.com/nathannq/fpl-optimizer.git && cd fpl-optimizer
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt -e .   # or: make setup
 ```
 
