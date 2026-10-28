@@ -6,6 +6,7 @@ pyarrow==26.0.0
 requests==2.34.2
 PyYAML==6.0.3
 scikit-learn==1.9.1
+joblib==1.6.0
 lightgbm==4.7.0
 PuLP==4.2.0
 fastapi==0.162.0

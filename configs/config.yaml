@@ -4,7 +4,8 @@ paths:
   raw_history: data/raw/vaastav        # downloaded historical seasons (gitignored)
   api_cache: data/cache/api            # timestamped FPL API responses
   snapshots: data/snapshots            # archived bootstrap-static (for future ep_next backtests)
-  processed: data/processed            # feature table (parquet)
+  processed: data/processed            # feature table and predictions (parquet)
+  models: models                       # trained model files + metadata (gitignored)
   reports: reports                     # generated, committed results
 
 history:
@@ -48,6 +49,35 @@ targets:
   multi_gw_horizon: 3                  # optional target: points over the next N gameweeks
 
 evaluation:
-  seasons: ["2023-24", "2024-25", "2025-26", "2026-27"]
+  seasons: ["2023-24", "2024-25", "2025-26", "2026-27"]   # Phase 1 baseline report
+  top_k: 10                            # differentials flagged per gameweek
+
+model:
+  seed: 42
+  # Walk-forward validation by season: each season is predicted by models trained only on
+  # earlier seasons. Dev seasons are used to choose the differential-score weights;
+  # test seasons are never used for any choice.
+  dev_seasons: ["2024-25"]
+  test_seasons: ["2025-26", "2026-27"]
+  early_stopping_rounds: 100           # tuned on the last training season (time-based)
+  ridge_alpha: 10.0
+  lightgbm:
+    n_estimators: 3000                 # upper bound; early stopping picks the number
+    learning_rate: 0.03
+    num_leaves: 31
+    min_child_samples: 100
+    subsample: 0.8
+    subsample_freq: 1
+    colsample_bytree: 0.8
+    reg_lambda: 5.0
+
+differential:
   ownership_max_pct: 10.0              # a differential is owned by fewer than this % of managers
-  top_k: 10
+  # score = pred_points + haul_weight * P(haul) + edge_weight * (pred_points - implied_points)
+  #         - price_weight * price
+  # where implied_points is what ownership + price + position + fixtures alone predict.
+  # Weights are chosen from this grid on the dev seasons only.
+  grid:
+    haul_weight: [0.0, 2.0, 5.0, 10.0]
+    edge_weight: [0.0, 0.5, 1.0]
+    price_weight: [0.0, 0.25, 0.5]

@@ -18,11 +18,24 @@ class Paths:
     api_cache: Path
     snapshots: Path
     processed: Path
+    models: Path
     reports: Path
 
     @property
     def features(self) -> Path:
         return self.processed / "features.parquet"
+
+    @property
+    def live_players(self) -> Path:
+        return self.processed / "live_players.parquet"
+
+    @property
+    def oos_predictions(self) -> Path:
+        return self.processed / "oos_predictions.parquet"
+
+    @property
+    def predictions(self) -> Path:
+        return self.processed / "predictions.parquet"
 
 
 @dataclass(frozen=True)
@@ -61,8 +74,23 @@ class TargetConfig:
 @dataclass(frozen=True)
 class EvalConfig:
     seasons: tuple[str, ...]
-    ownership_max_pct: float
     top_k: int
+
+
+@dataclass(frozen=True)
+class ModelConfig:
+    seed: int
+    dev_seasons: tuple[str, ...]
+    test_seasons: tuple[str, ...]
+    early_stopping_rounds: int
+    ridge_alpha: float
+    lightgbm: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class DifferentialConfig:
+    ownership_max_pct: float
+    grid: dict[str, list[float]]
 
 
 @dataclass(frozen=True)
@@ -73,6 +101,8 @@ class Config:
     features: FeatureConfig
     targets: TargetConfig
     evaluation: EvalConfig
+    model: ModelConfig
+    differential: DifferentialConfig
 
 
 def _resolve(path: str | Path) -> Path:
@@ -100,4 +130,6 @@ def load_config(path: str | Path | None = None) -> Config:
         features=_build(FeatureConfig, raw["features"]),
         targets=_build(TargetConfig, raw["targets"]),
         evaluation=_build(EvalConfig, raw["evaluation"]),
+        model=_build(ModelConfig, raw["model"]),
+        differential=_build(DifferentialConfig, raw["differential"]),
     )

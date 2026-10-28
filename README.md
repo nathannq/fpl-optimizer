@@ -4,7 +4,7 @@ A Fantasy Premier League tool built around a machine-learning model that looks f
 differential players**: players owned by few managers who are likely to score well. A transfer
 optimizer and a web UI sit on top of it.
 
-> **Status:** Phase 1 of 5 is complete (data pipeline and baselines). The model, optimizer, web UI and
+> **Status:** Phases 1-2 of 5 are complete (data pipeline, baselines, model). The optimizer, web UI and
 > polish follow. See [Roadmap](#roadmap).
 
 ## What's here so far
@@ -16,6 +16,9 @@ optimizer and a web UI sit on top of it.
   from gameweek N onwards, then checks that no feature for gameweek N or earlier changes.
 - **Honest baselines**, written up in [`reports/phase1_baselines.md`](reports/phase1_baselines.md),
   including a finding about FPL's historical "xP" (below).
+- **A LightGBM model** that predicts points, haul probability and 3-gameweek points. It is validated
+  walk-forward by season. On seasons it never saw, its top-10 differentials returned 38% of the time
+  against 27% for the baseline ([`reports/phase2_model.md`](reports/phase2_model.md)).
 
 ## Setup
 
@@ -52,7 +55,7 @@ Seasons 2022-23 onward are used because they are the first with xG/xA.
 ## The pipeline
 
 ```bash
-make refresh          # = download-history -> build-features -> baselines
+make refresh          # = download-history -> build-features -> baselines -> train -> predict
 ```
 
 | Command | Does |
@@ -61,6 +64,8 @@ make refresh          # = download-history -> build-features -> baselines
 | `python -m fplopt fetch-live` | Fetch the current season from the API (about 670 player histories, cached for 12h) |
 | `python -m fplopt build-features [--no-live]` | Write `data/processed/features.parquet`, including rows for the next gameweek |
 | `python -m fplopt baselines` | Write `reports/phase1_baselines.md` |
+| `python -m fplopt train` | Walk-forward evaluation, final models in `models/`, write `reports/phase2_model.md` (about 40s) |
+| `python -m fplopt predict [--top 10]` | Predict the next gameweek, save `data/processed/predictions.parquet`, list the top differentials |
 | `make test` | Run the test suite (no network needed) |
 
 ### Features (all known before the gameweek)
@@ -116,6 +121,95 @@ is not achievable by any honest model. Because of this:
 
 Full tables: [`reports/phase1_baselines.md`](reports/phase1_baselines.md).
 
+## The model
+
+### How it works
+
+- **Three targets:** points next gameweek (regression), a haul of 8+ points (classifier), and points
+  over the next 3 gameweeks (regression).
+- **Two model families:**
+  - ridge regression, with L2 logistic regression for hauls (median imputation, missing-value
+    indicators, scaled features, one-hot position);
+  - LightGBM, which handles missing values and position natively.
+- **Validation is walk-forward by season.** Each season is predicted only by models trained on earlier
+  seasons. The number of boosting rounds comes from early stopping on the latest *training* season.
+  Nothing is shuffled. 2024-25 is the **dev** season, used to choose the differential-score weights.
+  2025-26 and 2026-27 to date are the **test** seasons, and are never used for any decision.
+- **Reproducible.** All settings live in [`configs/config.yaml`](configs/config.yaml). LightGBM runs
+  in deterministic mode with a fixed seed, so two runs produce a byte-identical report. Models are
+  saved to `models/final/` with a `meta.json` recording the training seasons, tree counts, chosen
+  weights, package versions and the data commit.
+
+### The differential score
+
+```
+score = predicted points + haul_weight × P(haul) + edge_weight × (predicted − market-implied points) − price_weight × price
+```
+
+The score covers only players owned by fewer than 10% of managers going into the gameweek
+(configurable). *Market-implied points* is what ownership, price, position and fixtures predict on
+their own, i.e. "what ownership implies". The weights are picked from a grid by precision@10 on the
+dev season.
+
+The honest outcome: **every extra term made dev results worse.** Upweighting haul probability,
+rewarding the edge over the market, and penalising price all lost to plain predicted points. Ranking
+by edge alone did worse than the baseline on dev (0.27 against 0.32 precision), because it favours
+fringe players the crowd is rightly ignoring. So the chosen weights are all 0, and the score is currently *predicted points among players
+owned by less than 10%*. The other terms stay in the config, and the weights are re-chosen whenever the
+model is retrained.
+
+### Results on the test seasons (2025-26 and 2026-27, 44 gameweeks)
+
+| | Last-3 average (baseline) | Ridge | LightGBM |
+|---|---|---|---|
+| Points MAE | 1.105 | 1.057 | **1.018** |
+| Points Spearman (per GW) | 0.703 | 0.698 | **0.710** |
+| Haul AUC | 0.825 | 0.855 | **0.860** |
+| 3-GW points MAE | 2.73 | 2.40 | **2.34** |
+| **Top-10 differentials: precision@10 (5+ pts)** | 0.268 | 0.357 | **0.382** |
+| Top-10 differentials: haul rate (8+) | 0.141 | 0.200 | **0.214** |
+| Top-10 differentials: mean points | 3.50 | 4.23 | **4.43** |
+
+For comparison, an average differential scores 1.06 points and returns 7.6% of the time.
+
+**Is the gain real?** In a gameweek-paired bootstrap against the baseline's top 10, LightGBM adds
+**+11.4 percentage points of precision** (95% CI +5.7 to +17.3) and **+0.92 points per pick** (95% CI
++0.52 to +1.34). It wins 64% of gameweeks and ties 18%. The gain holds in every season: 2024-25,
+2025-26 and 2026-27 so far.
+
+**Against FPL's xP:** on gameweeks where it was recorded, the look-ahead xP still has a lower MAE
+(0.87 against LightGBM's 1.02). That's expected, because it partly saw the result. A clean ep_next
+comparison builds up from the live snapshots.
+
+**Modest where it should be.** For predicting every player's points, the model only slightly beats
+last-3 on ranking (Spearman 0.710 against 0.703). Most of that ranking is the easy part: who plays and
+who doesn't. The real gain is in the tail, picking which low-owned players return, which is the job it
+was built for.
+
+### What drives it
+
+Mean |SHAP| on the final model, using LightGBM's built-in TreeSHAP:
+
+- **Points:** minutes in the last match by a distance, then points per match this season, minutes
+  over the last 3, price and ownership.
+- **Hauls:** points per match this season and the minutes features, then ownership and price.
+
+Price and ownership carry real signal. The market is informative, which is also why "edge over the
+market" makes a poor ranking on its own. Full tables are in
+[`reports/phase2_model.md`](reports/phase2_model.md).
+
+### Live predictions
+
+`python -m fplopt predict` scores the next gameweek with the final model, which is trained on
+everything including the current season to date. It then makes three adjustments:
+
+- **Availability:** each prediction is multiplied by FPL's live chance of playing. Injured, suspended
+  or departed players get 0.
+- **Eligibility:** a player qualifies as a differential based on ownership *right now*.
+- **Reasons:** each player gets three, taken from SHAP values and measured against a typical regular
+  starter, e.g. *"xA per match, last 5 0.23 (+0.2)"*. Measuring against all players would put "plays
+  90 minutes" first on every starter's list.
+
 ## Data quirks handled
 
 - **Missing xP.** xP was not captured in some gameweeks (all zeros), including most of 2025-26.
@@ -136,17 +230,18 @@ configs/config.yaml        all settings (seasons, windows, thresholds)
 src/fplopt/
   data/                    API client, vaastav downloader, live season, common schema
   features/                stacked tables and the leak-free feature builder
+  models/                  datasets & folds, ridge/LightGBM, differential score, SHAP reasons, report
   baselines.py, evaluate.py
-  cli.py                   python -m fplopt <command>
-tests/                     leakage, feature values, data, API cache, metrics
+  pipeline.py, cli.py      python -m fplopt <command>
+tests/                     leakage, feature values, data, API cache, metrics, models
 reports/                   generated results (committed)
 ```
 
 ## Roadmap
 
 1. ~~Data pipeline and baselines~~
-2. Model: ridge, then LightGBM, for points, haul probability and 3-gameweek points; time-based
-   validation; differential score; precision@10 against baselines; feature importance
+2. ~~Model: ridge and LightGBM, walk-forward validation, differential score, evaluation against
+   baselines~~
 3. Optimizer: PuLP MILP for next-gameweek transfers, with hits, the selling-price rule and
    availability
 4. Web UI: FastAPI and plain HTML/JS, with a pitch view, differentials page and mini-league view
@@ -162,4 +257,8 @@ Designed for, but not yet built: chip planning and a multi-gameweek planner.
   ahead may not have been announced at the time, which slightly flatters the 3-gameweek fixture
   features.
 - **Defensive contributions.** These have scored points only since 2025-26, so older seasons have
-  no defensive-contribution features.
+  no defensive-contribution features. The 2025-26 test fold was trained without any.
+- **Availability is counted twice.** The live chance-of-playing multiplier partly overlaps with what
+  the model already learned from minutes.
+- **The weight grid is small.** Precision@10 is noisy over a single dev season, so the differential
+  weights are chosen from a deliberately small grid.

@@ -51,7 +51,7 @@ def xp_lookahead_check(df: pd.DataFrame) -> pd.DataFrame:
 def baseline_report(df: pd.DataFrame, cfg: Config) -> str:
     """Markdown report of both baselines over the evaluation seasons."""
     ev = cfg.evaluation
-    k, own = ev.top_k, ev.ownership_max_pct
+    k, own = ev.top_k, cfg.differential.ownership_max_pct
     ret, haul = cfg.targets.return_points, cfg.targets.haul_points
     data = add_baselines(df[df["season"].isin(ev.seasons) & df["y_points"].notna()])
     xp_gws = data.groupby(["season", "gw"])["xp_fpl"].transform(lambda s: s.notna().any())

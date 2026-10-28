@@ -1,7 +1,7 @@
 # Common tasks. Run `make setup` once, then `make refresh` each week.
 PY ?= .venv/bin/python
 
-.PHONY: setup data live features baselines refresh test
+.PHONY: setup data live features baselines train predict refresh test
 
 setup:            ## create the virtualenv and install everything
 	uv venv --python 3.12 .venv || python3 -m venv .venv
@@ -18,6 +18,12 @@ features:         ## build data/processed/features.parquet (history + live seaso
 
 baselines:        ## evaluate baselines -> reports/phase1_baselines.md
 	$(PY) -m fplopt baselines
+
+train:            ## walk-forward evaluation + final models -> models/, reports/phase2_model.md
+	$(PY) -m fplopt train
+
+predict:          ## predict the next gameweek and list the top differentials
+	$(PY) -m fplopt predict
 
 refresh:          ## everything above, in order
 	$(PY) -m fplopt refresh

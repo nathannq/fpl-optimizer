@@ -7,6 +7,7 @@ __pycache__/
 
 # Data and caches (rebuilt by `make data` / `make features`)
 /data/
+/models/
 
 # OS / editor
 .DS_Store

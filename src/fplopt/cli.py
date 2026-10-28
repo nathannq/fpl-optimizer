@@ -48,9 +48,29 @@ def cmd_baselines(cfg: Config, args: argparse.Namespace) -> None:
     print(f"Saved {out}")
 
 
+def cmd_train(cfg: Config, args: argparse.Namespace) -> None:
+    from fplopt.pipeline import run_training
+
+    run_training(cfg)
+    print(f"Saved models to {cfg.paths.models} and report to {cfg.paths.reports / 'phase2_model.md'}")
+
+
+def cmd_predict(cfg: Config, args: argparse.Namespace) -> None:
+    from fplopt.pipeline import predict_upcoming, top_differentials
+
+    preds = predict_upcoming(cfg)
+    gw = int(preds["gw"].iloc[0])
+    cols = ["web_name", "team_short", "position", "now_cost", "ownership_now", "pred_points", "p_haul",
+            "differential_score", "reasons"]
+    with pd.option_context("display.max_colwidth", 90, "display.width", 250):
+        print(f"GW{gw} - top {args.top} differentials (owned by < {cfg.differential.ownership_max_pct:g}%)")
+        print(top_differentials(preds, args.top)[cols].round(2).to_string())
+    print(f"Saved {len(preds)} predictions to {cfg.paths.predictions}")
+
+
 def cmd_refresh(cfg: Config, args: argparse.Namespace) -> None:
-    args.force, args.no_live = False, False
-    for step in (cmd_download_history, cmd_build_features, cmd_baselines):
+    args.force, args.no_live, args.top = False, False, cfg.evaluation.top_k
+    for step in (cmd_download_history, cmd_build_features, cmd_baselines, cmd_train, cmd_predict):
         step(cfg, args)
 
 
@@ -59,7 +79,9 @@ COMMANDS = {
     "fetch-live": (cmd_fetch_live, "fetch and cache the current season from the FPL API"),
     "build-features": (cmd_build_features, "build data/processed/features.parquet"),
     "baselines": (cmd_baselines, "evaluate the baselines and write reports/phase1_baselines.md"),
-    "refresh": (cmd_refresh, "download-history + build-features + baselines"),
+    "train": (cmd_train, "walk-forward evaluation + final models -> models/, reports/phase2_model.md"),
+    "predict": (cmd_predict, "predict the next gameweek and list the top differentials"),
+    "refresh": (cmd_refresh, "download-history + build-features + baselines + train + predict"),
 }
 
 
@@ -74,6 +96,8 @@ def main(argv: list[str] | None = None) -> None:
             p.add_argument("--force", action="store_true", help="re-download files already present")
         if name == "build-features":
             p.add_argument("--no-live", action="store_true", help="historical seasons only (no API calls)")
+        if name == "predict":
+            p.add_argument("--top", type=int, default=10, help="how many differentials to list")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s", stream=sys.stderr)
