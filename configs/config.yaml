@@ -81,3 +81,25 @@ differential:
     haul_weight: [0.0, 2.0, 5.0, 10.0]
     edge_weight: [0.0, 0.5, 1.0]
     price_weight: [0.0, 0.25, 0.5]
+
+optimizer:
+  budget: 1000                         # tenths of £m: a new squad costs at most £100.0m
+  hit_cost: 4                          # points per transfer beyond the free ones
+  max_free_transfers: 5                # free transfers bank up to this
+  max_transfers: 2                     # options compared each week: 0..max_transfers transfers
+  min_gain_per_transfer: 0.5           # recommend one more transfer only if it adds at least this
+  bench_weight: 0.1                    # weight on bench points (autosub cover) in the objective
+  min_chance_of_playing: 75            # below this %, a player can't be bought or started
+  differential_bonus: 0.0              # e.g. 0.1 = +10% on differentials' projected points (objective only)
+  projection: model                    # default projection source: model | ep_next
+  solver_time_limit: 30                # seconds per solve
+
+backtest:
+  # Replays a season week by week: the optimizer picks transfers, XI and captain from each
+  # projection source, and is scored on what actually happened (with autosubs).
+  seasons: ["2024-25", "2025-26"]
+  start_gw: 2                          # prices are known from the previous gameweek
+  sources:                             # name -> projection column in the out-of-sample predictions
+    model: lgbm_points
+    last3: base_last3
+    ep_next: ep_next                   # from archived live snapshots; skipped until a season has them

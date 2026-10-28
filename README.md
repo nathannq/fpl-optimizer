@@ -4,8 +4,8 @@ A Fantasy Premier League tool built around a machine-learning model that looks f
 differential players**: players owned by few managers who are likely to score well. A transfer
 optimizer and a web UI sit on top of it.
 
-> **Status:** Phases 1-2 of 5 are complete (data pipeline, baselines, model). The optimizer, web UI and
-> polish follow. See [Roadmap](#roadmap).
+> **Status:** Phases 1-3 of 5 are complete (data pipeline, baselines, model, transfer optimizer). The web
+> UI and polish follow. See [Roadmap](#roadmap).
 
 ## What's here so far
 
@@ -19,6 +19,10 @@ optimizer and a web UI sit on top of it.
 - **A LightGBM model** that predicts points, haul probability and 3-gameweek points. It is validated
   walk-forward by season. On seasons it never saw, its top-10 differentials returned 38% of the time
   against 27% for the baseline ([`reports/phase2_model.md`](reports/phase2_model.md)).
+- **A transfer optimizer**: a mixed-integer program that recommends transfers, the XI, bench order and
+  captain for your real team. Replaying two full seasons, the model's projections scored **2,019 and
+  2,153 points** against **1,817 and 1,763** for the baseline's
+  ([`reports/phase3_backtest.md`](reports/phase3_backtest.md)).
 
 ## Setup
 
@@ -66,6 +70,8 @@ make refresh          # = download-history -> build-features -> baselines -> tra
 | `python -m fplopt baselines` | Write `reports/phase1_baselines.md` |
 | `python -m fplopt train` | Walk-forward evaluation, final models in `models/`, write `reports/phase2_model.md` (about 40s) |
 | `python -m fplopt predict [--top 10]` | Predict the next gameweek, save `data/processed/predictions.parquet`, list the top differentials |
+| `python -m fplopt optimize --team-id <id>` | Transfers (0/1/2 compared), XI, bench, captain for your team; omit `--team-id` for a new squad |
+| `python -m fplopt backtest` | Replay past seasons with each projection source, write `reports/phase3_backtest.md` (about 1 min) |
 | `make test` | Run the test suite (no network needed) |
 
 ### Features (all known before the gameweek)
@@ -210,6 +216,80 @@ everything including the current season to date. It then makes three adjustments
   starter, e.g. *"xA per match, last 5 0.23 (+0.2)"*. Measuring against all players would put "plays
   90 minutes" first on every starter's list.
 
+## The optimizer
+
+`python -m fplopt optimize --team-id 1234567` (or `make optimize TEAM=1234567`) prints the recommended
+transfers, the 0/1/2-transfer comparison, the starting XI by position, the captain and vice-captain,
+and the bench order. Options:
+
+- `--projection model|ep_next` swaps the projection source between this model and FPL's own.
+- `--differential-bonus 0.1` adds +10% to differentials' projected points in the objective.
+- `--free-transfers` and `--bank` override the inferred values.
+- `--max-transfers N` compares more options.
+
+### The formulation
+
+A mixed-integer program (PuLP, solved by [HiGHS](https://highs.dev)) over every player. For each player
+it decides *in squad*, *starting* and *captain*:
+
+```
+maximise   XI points + captain's points again + 0.1 × bench points − 4 × hits
+subject to 2 GK / 5 DEF / 5 MID / 3 FWD; at most 3 per club
+           XI of 11: 1 GK, 3-5 DEF, 2-5 MID, 1-3 FWD; captain in the XI
+           spend on new players ≤ bank + selling prices of players sold
+           hits ≥ transfers − free transfers
+           no buying or starting players flagged injured/suspended/left, or under 75% to play
+```
+
+It optimizes the **next gameweek only**. Each transfer count from 0 to 2 is solved exactly, which
+takes about 0.1s per solve. One more transfer is recommended only if it adds at least 0.5 projected
+points, so marginal moves don't use up a free transfer that could be banked. The bench is ordered as
+FPL substitutes: reserve goalkeeper first, then outfielders by projection.
+
+### Your real team, from public endpoints only
+
+No login is needed. The public API doesn't expose selling prices, so they are rebuilt from your
+transfer history:
+
+- **Purchase price:** the cost of the latest transfer that brought each player in. Players from your
+  original squad use their price in the gameweek you joined.
+- **Selling price:** FPL's rule, under which you keep half of any rise (rounded down) and take every
+  fall in full.
+- **Free Hit weeks:** transfers in a Free Hit week are ignored and the squad reverts.
+- **Pending transfers:** transfers you have already made for the coming gameweek are applied.
+- **Free transfers:** replayed from your history. That means +1 a week, banking up to 5, with
+  Wildcard and Free Hit weeks keeping saved transfers. Any of these can be overridden on the command
+  line.
+
+### Backtest: does a better projection win more points?
+
+Each season is replayed week by week. Every gameweek, the optimizer sees only out-of-sample
+projections plus prices and ownership going into the week. It makes transfers under the real rules,
+then is scored on actual points with automatic substitutions and the vice-captain rule.
+
+| Season | Projection | Points | Per GW | Projected per GW | Transfers | Hits |
+|---|---|---|---|---|---|---|
+| 2024-25 | last-3 average | 1,817 | 49.1 | 84.4 | 68 | 32 |
+| 2024-25 | **model** | **2,019** | **54.6** | 54.3 | 39 | 3 |
+| 2025-26 | last-3 average | 1,763 | 47.6 | 82.4 | 64 | 28 |
+| 2025-26 | **model** | **2,153** | **58.2** | 54.0 | 39 | 3 |
+
+The **model wins by +5.5 points per gameweek in 2024-25** (95% CI −1.9 to +12.4, so not conclusive on
+its own) and by **+10.5 in 2025-26** (95% CI +4.4 to +17.1). It wins 60-65% of gameweeks.
+
+The "projected per GW" column shows why. The last-3 average promised 82-84 points a week for the team
+it picked and delivered 48-49. Optimizing over noisy projections selects whoever is on a lucky
+streak, so the optimizer keeps chasing form and pays for it in hits (28-32 a season). The model's
+projections for its own team were honest, at 54 projected against 55-58 delivered, so it took only 3
+hits a season.
+
+Simplifications: there are no chips; transfers use the previous gameweek's prices; there are no
+historical injury flags; GW1 is skipped because prices are only known from the previous gameweek.
+
+FPL's own `ep_next` is a supported source in both `optimize` and `backtest`. The backtest picks it up
+automatically once the archived live snapshots cover a season. The historical files only have a
+look-ahead xP, so the comparison starts with 2026-27.
+
 ## Data quirks handled
 
 - **Missing xP.** xP was not captured in some gameweeks (all zeros), including most of 2025-26.
@@ -231,9 +311,10 @@ src/fplopt/
   data/                    API client, vaastav downloader, live season, common schema
   features/                stacked tables and the leak-free feature builder
   models/                  datasets & folds, ridge/LightGBM, differential score, SHAP reasons, report
+  optimize/                rules, MILP solver, projection sources, team loader, backtest, rendering
   baselines.py, evaluate.py
   pipeline.py, cli.py      python -m fplopt <command>
-tests/                     leakage, feature values, data, API cache, metrics, models
+tests/                     leakage, feature values, data, API cache, metrics, models, optimizer
 reports/                   generated results (committed)
 ```
 
@@ -242,8 +323,8 @@ reports/                   generated results (committed)
 1. ~~Data pipeline and baselines~~
 2. ~~Model: ridge and LightGBM, walk-forward validation, differential score, evaluation against
    baselines~~
-3. Optimizer: PuLP MILP for next-gameweek transfers, with hits, the selling-price rule and
-   availability
+3. ~~Optimizer: PuLP MILP for next-gameweek transfers, with hits, the selling-price rule,
+   availability and a season backtest~~
 4. Web UI: FastAPI and plain HTML/JS, with a pitch view, differentials page and mini-league view
 5. Polish: README with results chart and screenshots, a weekly one-command refresh
 
@@ -260,5 +341,9 @@ Designed for, but not yet built: chip planning and a multi-gameweek planner.
   no defensive-contribution features. The 2025-26 test fold was trained without any.
 - **Availability is counted twice.** The live chance-of-playing multiplier partly overlaps with what
   the model already learned from minutes.
+- **Next gameweek only.** The optimizer doesn't value rolling a transfer for a future double
+  gameweek, beyond the 0.5-point threshold. A multi-gameweek planner is a designed-for extension.
+- **Free-transfer inference.** One-off FPL top-ups are not modelled. Use `--free-transfers` if the
+  inferred number is wrong.
 - **The weight grid is small.** Precision@10 is noisy over a single dev season, so the differential
   weights are chosen from a deliberately small grid.

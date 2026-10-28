@@ -138,6 +138,52 @@ def predict_upcoming(cfg: Config) -> pd.DataFrame:
     return out
 
 
+def run_backtest_report(cfg: Config) -> str:
+    """Replay the configured seasons with each projection source and write the Phase 3 report."""
+    from fplopt.optimize.backtest import backtest_summary, head_to_head, run_backtest
+    from fplopt.reporting import markdown_table
+
+    weeks = run_backtest(pd.read_parquet(cfg.paths.oos_predictions), pd.read_parquet(cfg.paths.features), cfg)
+    weeks.to_parquet(cfg.paths.processed / "backtest_weeks.parquet", index=False)
+    sources = list(dict.fromkeys(weeks["source"]))
+    vs = pd.concat([head_to_head(weeks, a, "last3", seed=cfg.model.seed) for a in sources if a != "last3"],
+                   ignore_index=True) if "last3" in sources else pd.DataFrame()
+    opt = cfg.optimizer
+    report = "\n".join([
+        "# Phase 3 - optimizer backtest",
+        "",
+        "Each season is replayed week by week. Every gameweek the optimizer sees only one source's "
+        "out-of-sample projections plus prices and ownership going into the gameweek. It makes transfers "
+        f"(1 free a week, banking up to {opt.max_free_transfers}, -{opt.hit_cost} per extra, the selling-price "
+        f"rule, up to {opt.max_transfers} a week, and one more only if it adds {opt.min_gain_per_transfer:g}+ "
+        "projected points), then picks the XI, bench order and captain. It is scored on actual points with "
+        "automatic substitutions and the vice-captain rule.",
+        "",
+        f"The squad is picked from scratch at GW{cfg.backtest.start_gw}, the first gameweek with known "
+        "prices. Not modelled: chips, price changes within a gameweek, historical injury flags.",
+        "",
+        "## Season totals",
+        "",
+        markdown_table(backtest_summary(weeks)),
+        "",
+        "## Head to head (actual points, paired by gameweek)",
+        "",
+        markdown_table(vs) if not vs.empty else "_Only one source ran._",
+        "",
+        "`ci_low`/`ci_high`: 95% interval for the mean difference per gameweek, from resampling gameweeks.",
+        "",
+        "## Sources",
+        "",
+        "- `model` - the LightGBM points model, trained only on earlier seasons (walk-forward).",
+        "- `last3` - last-3-fixture average x fixtures this gameweek.",
+        "- `ep_next` - FPL's own projection, from live snapshots taken before each deadline. Historical "
+        "files only hold a post-gameweek xP, so this source appears once a season has snapshots.",
+        "",
+    ])
+    (cfg.paths.reports / "phase3_backtest.md").write_text(report)
+    return report
+
+
 def top_differentials(predictions: pd.DataFrame, k: int) -> pd.DataFrame:
     flagged = predictions.dropna(subset=["differential_score"])
     return flagged.sort_values("differential_score", ascending=False).head(k).reset_index(drop=True)

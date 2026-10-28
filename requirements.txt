@@ -9,6 +9,7 @@ scikit-learn==1.9.1
 joblib==1.6.0
 lightgbm==4.7.0
 PuLP==4.2.0
+highspy==1.15.1                    # MILP solver used through PuLP
 fastapi==0.162.0
 uvicorn[standard]==0.54.0
 httpx==0.28.1

@@ -158,6 +158,10 @@ class FPLClient:
     def entry_history(self, team_id: int) -> dict:
         return self.get(f"entry/{team_id}/history/", self.ttl["entry"])
 
+    def transfers(self, team_id: int) -> list[dict]:
+        """Every transfer the manager has made this season (with the prices paid/received)."""
+        return self.get(f"entry/{team_id}/transfers/", self.ttl["entry"])
+
     def picks(self, team_id: int, gameweek: int) -> dict:
         return self.get(f"entry/{team_id}/event/{gameweek}/picks/", self.ttl["entry"])
 

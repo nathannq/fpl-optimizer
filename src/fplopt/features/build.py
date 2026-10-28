@@ -63,7 +63,8 @@ def horizon_prefix(cfg: Config) -> str:
 
 
 def target_columns(cfg: Config) -> list[str]:
-    return ["y_points", "y_haul", f"y_points_next{cfg.targets.multi_gw_horizon}"]
+    """Outcomes: the three model targets, plus minutes played (used to score backtests with autosubs)."""
+    return ["y_points", "y_haul", f"y_points_next{cfg.targets.multi_gw_horizon}", "y_minutes"]
 
 
 def feature_columns(cfg: Config) -> list[str]:
@@ -265,6 +266,7 @@ def last_complete_gw(schedule: pd.DataFrame) -> pd.Series:
 def add_targets(rows: pd.DataFrame, schedule: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     h = cfg.targets.multi_gw_horizon
     rows["y_points"] = rows["total_points"].where(~rows["is_future"])
+    rows["y_minutes"] = rows["minutes"].where(~rows["is_future"])
     rows["y_haul"] = (rows["y_points"] >= cfg.targets.haul_points).astype("float64").where(rows["y_points"].notna())
     pts = rows.set_index(["code", "season", "gw"])["y_points"]
     total = pd.Series(0.0, index=rows.index)

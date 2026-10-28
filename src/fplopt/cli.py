@@ -68,6 +68,23 @@ def cmd_predict(cfg: Config, args: argparse.Namespace) -> None:
     print(f"Saved {len(preds)} predictions to {cfg.paths.predictions}")
 
 
+def cmd_optimize(cfg: Config, args: argparse.Namespace) -> None:
+    from fplopt.optimize.render import render
+    from fplopt.optimize.service import optimize_team
+    from fplopt.pipeline import make_client
+
+    result = optimize_team(cfg, make_client(cfg), team_id=args.team_id, free_transfers=args.free_transfers,
+                           bank=args.bank, projection=args.projection, max_transfers=args.max_transfers,
+                           differential_bonus=args.differential_bonus)
+    print(render(result))
+
+
+def cmd_backtest(cfg: Config, args: argparse.Namespace) -> None:
+    from fplopt.pipeline import run_backtest_report
+
+    print(run_backtest_report(cfg))
+
+
 def cmd_refresh(cfg: Config, args: argparse.Namespace) -> None:
     args.force, args.no_live, args.top = False, False, cfg.evaluation.top_k
     for step in (cmd_download_history, cmd_build_features, cmd_baselines, cmd_train, cmd_predict):
@@ -81,6 +98,8 @@ COMMANDS = {
     "baselines": (cmd_baselines, "evaluate the baselines and write reports/phase1_baselines.md"),
     "train": (cmd_train, "walk-forward evaluation + final models -> models/, reports/phase2_model.md"),
     "predict": (cmd_predict, "predict the next gameweek and list the top differentials"),
+    "optimize": (cmd_optimize, "recommend transfers, XI and captain (or a new squad without --team-id)"),
+    "backtest": (cmd_backtest, "replay seasons with each projection source -> reports/phase3_backtest.md"),
     "refresh": (cmd_refresh, "download-history + build-features + baselines + train + predict"),
 }
 
@@ -98,6 +117,14 @@ def main(argv: list[str] | None = None) -> None:
             p.add_argument("--no-live", action="store_true", help="historical seasons only (no API calls)")
         if name == "predict":
             p.add_argument("--top", type=int, default=10, help="how many differentials to list")
+        if name == "optimize":
+            p.add_argument("--team-id", type=int, help="your FPL team id (omit to build a new squad)")
+            p.add_argument("--projection", choices=["model", "ep_next"], help="projection source (default: config)")
+            p.add_argument("--free-transfers", type=int, help="override the inferred free transfers")
+            p.add_argument("--bank", type=float, help="override the bank, in £m")
+            p.add_argument("--max-transfers", type=int, help="compare 0..N transfers (default: config)")
+            p.add_argument("--differential-bonus", type=float,
+                           help="e.g. 0.1 = +10%% weight on differentials' projected points")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s", stream=sys.stderr)

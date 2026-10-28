@@ -94,6 +94,27 @@ class DifferentialConfig:
 
 
 @dataclass(frozen=True)
+class OptimizerConfig:
+    budget: int
+    hit_cost: int
+    max_free_transfers: int
+    max_transfers: int
+    min_gain_per_transfer: float
+    bench_weight: float
+    min_chance_of_playing: float
+    differential_bonus: float
+    projection: str
+    solver_time_limit: int
+
+
+@dataclass(frozen=True)
+class BacktestConfig:
+    seasons: tuple[str, ...]
+    start_gw: int
+    sources: dict[str, str]
+
+
+@dataclass(frozen=True)
 class Config:
     paths: Paths
     history: HistoryConfig
@@ -103,6 +124,8 @@ class Config:
     evaluation: EvalConfig
     model: ModelConfig
     differential: DifferentialConfig
+    optimizer: OptimizerConfig
+    backtest: BacktestConfig
 
 
 def _resolve(path: str | Path) -> Path:
@@ -132,4 +155,6 @@ def load_config(path: str | Path | None = None) -> Config:
         evaluation=_build(EvalConfig, raw["evaluation"]),
         model=_build(ModelConfig, raw["model"]),
         differential=_build(DifferentialConfig, raw["differential"]),
+        optimizer=_build(OptimizerConfig, raw["optimizer"]),
+        backtest=_build(BacktestConfig, raw["backtest"]),
     )
