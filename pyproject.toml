@@ -15,7 +15,11 @@ fplopt = "fplopt.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+fplopt = ["web/static/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
 markers = ["slow: uses the downloaded historical data; skipped when it is missing"]
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]

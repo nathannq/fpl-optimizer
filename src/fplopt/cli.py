@@ -85,6 +85,15 @@ def cmd_backtest(cfg: Config, args: argparse.Namespace) -> None:
     print(run_backtest_report(cfg))
 
 
+def cmd_serve(cfg: Config, args: argparse.Namespace) -> None:
+    import uvicorn
+
+    from fplopt.web.app import create_app
+
+    print(f"Open http://{args.host}:{args.port}")
+    uvicorn.run(create_app(cfg), host=args.host, port=args.port, log_level="warning")
+
+
 def cmd_refresh(cfg: Config, args: argparse.Namespace) -> None:
     args.force, args.no_live, args.top = False, False, cfg.evaluation.top_k
     for step in (cmd_download_history, cmd_build_features, cmd_baselines, cmd_train, cmd_predict):
@@ -100,6 +109,7 @@ COMMANDS = {
     "predict": (cmd_predict, "predict the next gameweek and list the top differentials"),
     "optimize": (cmd_optimize, "recommend transfers, XI and captain (or a new squad without --team-id)"),
     "backtest": (cmd_backtest, "replay seasons with each projection source -> reports/phase3_backtest.md"),
+    "serve": (cmd_serve, "run the web UI (FastAPI) on http://127.0.0.1:8000"),
     "refresh": (cmd_refresh, "download-history + build-features + baselines + train + predict"),
 }
 
@@ -117,6 +127,9 @@ def main(argv: list[str] | None = None) -> None:
             p.add_argument("--no-live", action="store_true", help="historical seasons only (no API calls)")
         if name == "predict":
             p.add_argument("--top", type=int, default=10, help="how many differentials to list")
+        if name == "serve":
+            p.add_argument("--host", default="127.0.0.1")
+            p.add_argument("--port", type=int, default=8000)
         if name == "optimize":
             p.add_argument("--team-id", type=int, help="your FPL team id (omit to build a new squad)")
             p.add_argument("--projection", choices=["model", "ep_next"], help="projection source (default: config)")

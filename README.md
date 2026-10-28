@@ -4,8 +4,8 @@ A Fantasy Premier League tool built around a machine-learning model that looks f
 differential players**: players owned by few managers who are likely to score well. A transfer
 optimizer and a web UI sit on top of it.
 
-> **Status:** Phases 1-3 of 5 are complete (data pipeline, baselines, model, transfer optimizer). The web
-> UI and polish follow. See [Roadmap](#roadmap).
+> **Status:** Phases 1-4 of 5 are complete (data pipeline, baselines, model, transfer optimizer, web
+> UI). Polish follows. See [Roadmap](#roadmap).
 
 ## What's here so far
 
@@ -23,6 +23,9 @@ optimizer and a web UI sit on top of it.
   captain for your real team. Replaying two full seasons, the model's projections scored **2,019 and
   2,153 points** against **1,817 and 1,763** for the baseline's
   ([`reports/phase3_backtest.md`](reports/phase3_backtest.md)).
+- **A web UI** built with FastAPI and plain HTML/JS. It has three pages: your team on a pitch with the
+  recommended transfers, a differentials page with fixtures and reasons, and a mini-league view
+  showing what your rivals own. Run it with `make serve`.
 
 ## Setup
 
@@ -72,6 +75,7 @@ make refresh          # = download-history -> build-features -> baselines -> tra
 | `python -m fplopt predict [--top 10]` | Predict the next gameweek, save `data/processed/predictions.parquet`, list the top differentials |
 | `python -m fplopt optimize --team-id <id>` | Transfers (0/1/2 compared), XI, bench, captain for your team; omit `--team-id` for a new squad |
 | `python -m fplopt backtest` | Replay past seasons with each projection source, write `reports/phase3_backtest.md` (about 1 min) |
+| `python -m fplopt serve [--port 8000]` | Web UI at http://127.0.0.1:8000 |
 | `make test` | Run the test suite (no network needed) |
 
 ### Features (all known before the gameweek)
@@ -290,6 +294,49 @@ FPL's own `ep_next` is a supported source in both `optimize` and `backtest`. The
 automatically once the archived live snapshots cover a season. The historical files only have a
 look-ahead xP, so the comparison starts with 2026-27.
 
+## Web UI
+
+```bash
+make serve            # or: python -m fplopt serve  ->  http://127.0.0.1:8000
+```
+
+It's one FastAPI app. It serves a JSON API and a static single-page frontend in plain HTML, CSS and
+JS, with no build step and no external requests from the browser. The optimizer, predictions and
+FPL client are the same ones the CLI uses.
+
+- **My team.** Enter your team ID to see:
+  - expected points, transfers, bank and captain;
+  - the recommended transfers, each with its projected gain and your selling price;
+  - every 0/1/2-transfer option (click one to show it on the pitch);
+  - the XI on a pitch, with captain and vice badges, injury flags, *DIFF* tags on players owned by
+    under 10%, each player's expected points and next opponent, and the bench in substitution order.
+
+  The Options panel switches projections between the model and FPL's ep_next, sets a differential
+  bonus, and overrides free transfers. **Best new squad** builds the best £100m squad from scratch.
+- **Differentials.** Players owned by under 10% (adjustable), ranked by expected points. Each row
+  shows price, ownership, the next 3 fixtures coloured by FPL difficulty, haul probability, and the
+  model's three main reasons. You can filter by position and price.
+- **Mini-league.** Enter a league ID to see standings with rank movement. It also shows league
+  ownership, worked out from the current squads of the top 10-50 rivals:
+  - the league's *template*;
+  - **threats** (players rivals own and you don't, weighted by expected points);
+  - **your edge** (your players few rivals own);
+  - **untapped** strong picks that almost no rival has.
+
+The layout works at phone width, and it follows the system's light or dark mode. Team and league IDs
+are remembered in the browser only.
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/status` | Gameweek, deadline, data, prediction and model freshness, settings |
+| `GET /api/team/{id}?projection=&free_transfers=&bank=&max_transfers=&differential_bonus=` | Transfer options, recommended plan, XI, bench, captain |
+| `GET /api/squad?projection=&differential_bonus=` | The best new squad within £100m |
+| `GET /api/differentials?limit=&max_ownership=&position=&max_price=` | Top differentials with fixtures and reasons |
+| `GET /api/league/{id}?team_id=&sample=` | Standings, league template, threats, your edge, untapped picks |
+
+Errors come back as JSON with a readable `detail`: 404 for an unknown team or league, and 503 if the
+data hasn't been built yet. Interactive API docs are at `/docs`.
+
 ## Data quirks handled
 
 - **Missing xP.** xP was not captured in some gameweeks (all zeros), including most of 2025-26.
@@ -312,9 +359,10 @@ src/fplopt/
   features/                stacked tables and the leak-free feature builder
   models/                  datasets & folds, ridge/LightGBM, differential score, SHAP reasons, report
   optimize/                rules, MILP solver, projection sources, team loader, backtest, rendering
+  web/                     FastAPI app, page data (views.py), static/ frontend (HTML/CSS/JS)
   baselines.py, evaluate.py
   pipeline.py, cli.py      python -m fplopt <command>
-tests/                     leakage, feature values, data, API cache, metrics, models, optimizer
+tests/                     leakage, feature values, data, API cache, metrics, models, optimizer, web API
 reports/                   generated results (committed)
 ```
 
@@ -325,7 +373,7 @@ reports/                   generated results (committed)
    baselines~~
 3. ~~Optimizer: PuLP MILP for next-gameweek transfers, with hits, the selling-price rule,
    availability and a season backtest~~
-4. Web UI: FastAPI and plain HTML/JS, with a pitch view, differentials page and mini-league view
+4. ~~Web UI: FastAPI and plain HTML/JS, with a pitch view, differentials page and mini-league view~~
 5. Polish: README with results chart and screenshots, a weekly one-command refresh
 
 Designed for, but not yet built: chip planning and a multi-gameweek planner.
@@ -345,5 +393,7 @@ Designed for, but not yet built: chip planning and a multi-gameweek planner.
   gameweek, beyond the 0.5-point threshold. A multi-gameweek planner is a designed-for extension.
 - **Free-transfer inference.** One-off FPL top-ups are not modelled. Use `--free-transfers` if the
   inferred number is wrong.
+- **Mini-league ownership is sampled.** It comes from the top entries (20 by default, at most 50),
+  one API call each, and is cached for 5 minutes.
 - **The weight grid is small.** Precision@10 is noisy over a single dev season, so the differential
   weights are chosen from a deliberately small grid.

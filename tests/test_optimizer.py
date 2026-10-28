@@ -21,27 +21,7 @@ from fplopt.optimize.rules import (
 )
 from fplopt.optimize.solver import Plan, Squad, recommend, solve, transfer_options
 from fplopt.optimize.team import load_manager_team
-
-POSITIONS = ["GK", "DEF", "MID", "FWD"]
-
-
-def make_pool(seed: int = 0, clubs: int = 20) -> pd.DataFrame:
-    """A full-size league: every club has a complete 2/5/5/3 squad with random prices and projections."""
-    rng = np.random.default_rng(seed)
-    rows, pid = [], 1
-    for club in range(1, clubs + 1):
-        for pos in POSITIONS:
-            for _ in range(SQUAD_QUOTAS[pos]):
-                price = int(rng.integers(40, 130))
-                rows.append({"id": pid, "name": f"P{pid}", "position": pos, "club": club, "team": f"C{club}",
-                             "price": price, "projection": round(float(rng.uniform(0.5, 1.5) * price / 15), 2),
-                             "ownership": float(rng.uniform(0, 40)), "status": "a", "news": ""})
-                pid += 1
-    pool = pd.DataFrame(rows).set_index("id")
-    pool["objective"] = pool["projection"]
-    pool["can_buy"] = True
-    pool["can_start"] = True
-    return pool
+from synthetic import make_pool
 
 
 @pytest.fixture(scope="module")

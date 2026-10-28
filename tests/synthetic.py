@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from fplopt.data.schema import MARKET_COLUMNS, MATCH_STATS, SeasonData, normalise_matches
+from fplopt.optimize.rules import SQUAD_QUOTAS
 
 SEASONS = {"2022-23": [1, 2, 3, 4], "2023-24": [1, 2, 3, 5]}
 POSITIONS = ["GK", "DEF", "DEF", "MID", "FWD"]
@@ -135,3 +136,22 @@ def perturb_from(seasons: list[SeasonData], season: str, gw: int, seed: int = 99
         played = s.fixtures["finished"] & f_mask
         s.fixtures.loc[played, ["team_h_score", "team_a_score"]] = rng.integers(0, 9, size=(int(played.sum()), 2))
     return out
+
+
+def make_pool(seed: int = 0, clubs: int = 20) -> pd.DataFrame:
+    """A full-size league: every club has a complete 2/5/5/3 squad with random prices and projections."""
+    rng = np.random.default_rng(seed)
+    rows, pid = [], 1
+    for club in range(1, clubs + 1):
+        for pos in SQUAD_QUOTAS:
+            for _ in range(SQUAD_QUOTAS[pos]):
+                price = int(rng.integers(40, 130))
+                rows.append({"id": pid, "name": f"P{pid}", "position": pos, "club": club, "team": f"C{club}",
+                             "price": price, "projection": round(float(rng.uniform(0.5, 1.5) * price / 15), 2),
+                             "ownership": float(rng.uniform(0, 40)), "status": "a", "news": ""})
+                pid += 1
+    pool = pd.DataFrame(rows).set_index("id")
+    pool["objective"] = pool["projection"]
+    pool["can_buy"] = True
+    pool["can_start"] = True
+    return pool
